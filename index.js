@@ -1,8 +1,14 @@
 const mqtt = require('mqtt');
 const express = require('express');
+const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// 🔹 Informations Supabase
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_KEY;
+const supabase = createClient(supabaseUrl, supabaseKey);
 
 // 🔹 Informations HiveMQ
 const BROKER_URL = 'mqtts://ffe7ee4e59c342ec8d655e8c9d74d81e.s1.eu.hivemq.cloud:8883';
@@ -23,7 +29,7 @@ client.on('connect', () => {
   console.log('📡 Abonné au topic oran/water/pressure');
 });
 
-client.on('message', (topic, message) => {
+client.on('message', async (topic, message) => {
   const rawMsg = message.toString().trim();
   console.log('📩 Message reçu :', rawMsg);
 
@@ -40,11 +46,28 @@ client.on('message', (topic, message) => {
       waterState = Math.min(Math.max(calculatedPercent, 0), 100);
       
       console.log(`📊 ESP8266 -> Pression: ${payload.pressure_bar} Bar | Niveau: ${waterState.toFixed(1)}%`);
+
+      // 💾 Enregistrement dans Supabase
+      const { error } = await supabase
+        .from('water_pressure_logs')
+        .insert([
+          {
+            sensor_id: payload.device_id || 'oran_001',
+            pressure_bar: payload.pressure_bar
+          }
+        ]);
+
+      if (error) {
+        console.error('❌ Erreur Supabase :', error.message);
+      } else {
+        console.log('✅ Donnée enregistrée dans Supabase !');
+      }
+
     } else if (payload.water !== undefined) {
       waterState = parseFloat(payload.water);
     }
   } catch (e) {
-    // 2. Si ce n'est pas du JSON, traitement texte simple (ex: test via MQTT Explorer)
+    // 2. Si ce n'est pas du JSON, traitement texte simple
     const val = parseFloat(rawMsg);
     if (!isNaN(val)) {
       waterState = val;
