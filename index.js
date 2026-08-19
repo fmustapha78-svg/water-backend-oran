@@ -13,8 +13,8 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 
 // 🔹 Configuration HiveMQ Cloud
 const BROKER_URL = 'mqtts://92a6f58e0c8b4090a0eacfc30f19e310.s1.eu.hivemq.cloud:8883';
-const USERNAME = process.env.MQTT_USER || 'ferhat.mustapha';
-const PASSWORD = process.env.MQTT_PASS || 'Btsfermus.2020';
+const USERNAME = process.env.MQTT_USER || 'hivemq.webclient.1787141151845';
+const PASSWORD = process.env.MQTT_PASS || 'Ghir2#BP.4W3Cb0Tx%m:';
 
 let waterState = 0; // Niveau d'eau en %
 
