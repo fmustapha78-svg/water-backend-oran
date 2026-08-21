@@ -30,27 +30,22 @@ for (const envVar of requiredEnv) {
 // -----------------------------------------------------------------------------
 // 2. MIDDLEWARES DE SÉCURITÉ HTTP
 // -----------------------------------------------------------------------------
-// Protection des en-têtes HTTP
 app.use(helmet());
 
-// Configuration CORS (autorise l'accès client)
 app.use(cors({
   origin: process.env.ALLOWED_ORIGIN || '*',
   methods: ['GET', 'POST']
 }));
 
-// Limitation de taille du body pour éviter les DoS
 app.use(express.json({ limit: '10kb' }));
 
-// Limiteur de débit (Rate Limiting) sur les endpoints API
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // max 100 requêtes par 15 min par IP
+  windowMs: 15 * 60 * 1000,
+  max: 100,
   message: { error: 'Trop de requêtes, réessayez plus tard.' }
 });
 app.use('/api/', limiter);
 
-// Middleware d'authentification par clé d'API facultatif pour sécuriser /api/status
 const authenticateApiKey = (req, res, next) => {
   if (process.env.API_KEY) {
     const apiKey = req.headers['x-api-key'];
@@ -69,9 +64,8 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY
 // -----------------------------------------------------------------------------
 // 4. CONNEXION SÉCURISÉE MQTT (HiveMQ TLS)
 // -----------------------------------------------------------------------------
-let waterState = 0; // Niveau d'eau en %
+let waterState = 0;
 
-// Formater le Broker Host si l'utilisateur spécifie seulement le domaine
 let brokerUrl = process.env.MQTT_HOST;
 if (!brokerUrl.startsWith('mqtts://') && !brokerUrl.startsWith('mqtt://')) {
   brokerUrl = `mqtts://${brokerUrl}:8883`;
@@ -80,8 +74,8 @@ if (!brokerUrl.startsWith('mqtts://') && !brokerUrl.startsWith('mqtt://')) {
 const client = mqtt.connect(brokerUrl, {
   username: process.env.MQTT_USER,
   password: process.env.MQTT_PASS,
-  rejectUnauthorized: true, // TLS strict activé
-  reconnectPeriod: 5000     // Reconnexion automatique
+  rejectUnauthorized: true,
+  reconnectPeriod: 5000
 });
 
 client.on('connect', () => {
@@ -108,7 +102,6 @@ client.on('message', async (topic, message) => {
         return;
       }
 
-      // Conversion de la pression (0 à 3 bars) en pourcentage (0 à 100%)
       const maxPressure = 3.0;
       let calculatedPercent = (pressure / maxPressure) * 100;
 
@@ -116,15 +109,22 @@ client.on('message', async (topic, message) => {
 
       console.log(`📊 ESP8266 -> Pression: ${pressure} Bar | Niveau: ${waterState.toFixed(1)}%`);
 
-      // Enregistrement dans Supabase
+      // -----------------------------------------------------------------------
+      // Enregistrement dans Supabase (Inclusion de device_timestamp)
+      // -----------------------------------------------------------------------
+      const recordData = {
+        sensor_id: payload.device_id || payload.sensor_id || 'oran_001',
+        pressure_bar: pressure
+      };
+
+      // Si l'ESP8266 transmet un timestamp, on l'ajoute à la requête
+      if (payload.timestamp) {
+        recordData.device_timestamp = payload.timestamp;
+      }
+
       const { error } = await supabase
         .from('water_pressure_logs')
-        .insert([
-          {
-            sensor_id: payload.device_id || payload.sensor_id || 'oran_001',
-            pressure_bar: pressure
-          }
-        ]);
+        .insert([recordData]);
 
       if (error) {
         console.error('❌ Erreur Supabase :', error.message);
