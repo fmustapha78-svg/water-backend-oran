@@ -9,6 +9,9 @@ const { createClient } = require('@supabase/supabase-js');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Configuration pour le reverse proxy Render (résout le warning express-rate-limit)
+app.set('trust proxy', 1);
+
 // -----------------------------------------------------------------------------
 // 1. VÉRIFICATION DES VARIABLES D'ENVIRONNEMENT CRITIQUES
 // -----------------------------------------------------------------------------
@@ -89,7 +92,7 @@ client.on('connect', () => {
 
 client.on('message', async (topic, message) => {
   const rawMsg = message.toString().trim();
-  console.log('📩 Message reçu sur topic :', topic);
+  console.log('📩 Message reçu :', rawMsg);
 
   try {
     const payload = JSON.parse(rawMsg);
