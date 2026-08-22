@@ -9,43 +9,32 @@ const { createClient } = require('@supabase/supabase-js');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Configuration pour le reverse proxy Render (résout le warning express-rate-limit)
+// Configuration pour le reverse proxy Render
 app.set('trust proxy', 1);
 
 // -----------------------------------------------------------------------------
-// 1. VÉRIFICATION DES VARIABLES D'ENVIRONNEMENT CRITIQUES
+// 1. VÉRIFICATION DES VARIABLES D'ENVIRONNEMENT
 // -----------------------------------------------------------------------------
-const requiredEnv = [
-  'SUPABASE_URL',
-  'SUPABASE_KEY',
-  'MQTT_HOST',
-  'MQTT_USER',
-  'MQTT_PASS'
-];
-
+const requiredEnv = ['SUPABASE_URL', 'SUPABASE_KEY', 'MQTT_HOST', 'MQTT_USER', 'MQTT_PASS'];
 for (const envVar of requiredEnv) {
   if (!process.env[envVar]) {
-    console.error(`[ERREUR CRITIQUE] La variable d'environnement ${envVar} est manquante.`);
+    console.error(`[ERREUR] ${envVar} manquante.`);
     process.exit(1);
   }
 }
 
 // -----------------------------------------------------------------------------
-// 2. MIDDLEWARES DE SÉCURITÉ HTTP
+// 2. MIDDLEWARES
 // -----------------------------------------------------------------------------
 app.use(helmet());
-
-app.use(cors({
-  origin: process.env.ALLOWED_ORIGIN || '*',
-  methods: ['GET', 'POST']
-}));
-
+app.use(cors({ origin: '*', methods: ['GET', 'POST'] }));
 app.use(express.json({ limit: '10kb' }));
 
+// Limite augmentée pour permettre la lecture "temps réel" de l'application (5s)
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 100,
-  message: { error: 'Trop de requêtes, réessayez plus tard.' }
+  max: 300, // Augmenté pour supporter 1 requête/5s (12/min * 15min = 180)
+  message: { error: 'Trop de requêtes.' }
 });
 app.use('/api/', limiter);
 
@@ -53,22 +42,22 @@ const authenticateApiKey = (req, res, next) => {
   if (process.env.API_KEY) {
     const apiKey = req.headers['x-api-key'];
     if (!apiKey || apiKey !== process.env.API_KEY) {
-      return res.status(401).json({ error: 'Accès non autorisé : Clé API invalide.' });
+      return res.status(401).json({ error: 'Clé API invalide.' });
     }
   }
   next();
 };
 
 // -----------------------------------------------------------------------------
-// 3. INITIALISATION SUPABASE
+// 3. INITIALISATION
 // -----------------------------------------------------------------------------
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
-
-// -----------------------------------------------------------------------------
-// 4. CONNEXION SÉCURISÉE MQTT (HiveMQ TLS)
-// -----------------------------------------------------------------------------
 let waterState = 0;
+let lastSaveTime = 0; // Pour limiter l'enregistrement Supabase à 1 min
 
+// -----------------------------------------------------------------------------
+// 4. MQTT
+// -----------------------------------------------------------------------------
 let brokerUrl = process.env.MQTT_HOST;
 if (!brokerUrl.startsWith('mqtts://') && !brokerUrl.startsWith('mqtt://')) {
   brokerUrl = `mqtts://${brokerUrl}:8883`;
@@ -82,85 +71,44 @@ const client = mqtt.connect(brokerUrl, {
 });
 
 client.on('connect', () => {
-  console.log('✅ Backend connecté en TLS à HiveMQ Cloud');
-  client.subscribe('oran/water/pressure', (err) => {
-    if (!err) {
-      console.log('📡 Abonné avec succès au topic : oran/water/pressure');
-    }
-  });
+  console.log('✅ Connecté MQTT');
+  client.subscribe('oran/water/pressure');
 });
 
 client.on('message', async (topic, message) => {
   const rawMsg = message.toString().trim();
-  console.log('📩 Message reçu :', rawMsg);
-
   try {
     const payload = JSON.parse(rawMsg);
-
     if (payload.pressure_bar !== undefined) {
       const pressure = parseFloat(payload.pressure_bar);
+      if (isNaN(pressure)) return;
 
-      if (isNaN(pressure) || pressure < 0 || pressure > 20) {
-        console.warn('⚠️ Valeur de pression invalide ignorée :', payload.pressure_bar);
-        return;
+      // Mise à jour de l'état local INSTANTANÉE (toutes les 5s)
+      const maxPressure = 2.0; // Aligné sur le dashboard Android (200 kPa)
+      waterState = Math.min(Math.max((pressure / maxPressure) * 100, 0), 100);
+      console.log(`📡 Temps Réel -> Pression: ${pressure} Bar | ${waterState.toFixed(1)}%`);
+
+      // ENREGISTREMENT SUPABASE LIMITÉ À 1 MINUTE
+      const now = Date.now();
+      if (now - lastSaveTime >= 60000) { // 60 000 ms = 1 minute
+        lastSaveTime = now;
+        const recordData = {
+          sensor_id: payload.device_id || 'oran_001',
+          pressure_bar: pressure,
+          device_timestamp: payload.timestamp || new Date().toISOString()
+        };
+
+        const { error } = await supabase.from('water_pressure_logs').insert([recordData]);
+        if (error) console.error('❌ Erreur DB:', error.message);
+        else console.log('💾 Historique sauvegardé (1 min)');
       }
-
-      const maxPressure = 3.0;
-      let calculatedPercent = (pressure / maxPressure) * 100;
-
-      waterState = Math.min(Math.max(calculatedPercent, 0), 100);
-
-      console.log(`📊 ESP8266 -> Pression: ${pressure} Bar | Niveau: ${waterState.toFixed(1)}%`);
-
-      // -----------------------------------------------------------------------
-      // Enregistrement dans Supabase (Inclusion de device_timestamp)
-      // -----------------------------------------------------------------------
-      const recordData = {
-        sensor_id: payload.device_id || payload.sensor_id || 'oran_001',
-        pressure_bar: pressure
-      };
-
-      // Si l'ESP8266 transmet un timestamp, on l'ajoute à la requête
-      if (payload.timestamp) {
-        recordData.device_timestamp = payload.timestamp;
-      }
-
-      const { error } = await supabase
-        .from('water_pressure_logs')
-        .insert([recordData]);
-
-      if (error) {
-        console.error('❌ Erreur Supabase :', error.message);
-      } else {
-        console.log('✅ Donnée enregistrée dans Supabase !');
-      }
-
-    } else if (payload.water !== undefined) {
-      const val = parseFloat(payload.water);
-      if (!isNaN(val)) waterState = Math.min(Math.max(val, 0), 100);
     }
-  } catch (e) {
-    const val = parseFloat(rawMsg);
-    if (!isNaN(val)) {
-      waterState = Math.min(Math.max(val, 0), 100);
-      console.log(`🧪 Test manuel -> Niveau défini à : ${waterState}%`);
-    } else {
-      console.warn('⚠️ Format de message non reconnu');
-    }
-  }
-});
-
-client.on('error', (err) => {
-  console.error('❌ Erreur MQTT :', err.message);
+  } catch (e) { /* ignore */ }
 });
 
 // -----------------------------------------------------------------------------
-// 5. API ROUTES
+// 5. ROUTES
 // -----------------------------------------------------------------------------
-app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'OK', timestamp: new Date() });
-});
-
 app.get('/api/status', authenticateApiKey, (req, res) => {
   res.json({
     water: parseFloat(waterState.toFixed(1)),
@@ -168,9 +116,6 @@ app.get('/api/status', authenticateApiKey, (req, res) => {
   });
 });
 
-// -----------------------------------------------------------------------------
-// 6. LANCEMENT DU SERVEUR
-// -----------------------------------------------------------------------------
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🌐 Serveur HTTP sécurisé accessible sur le port ${PORT}`);
+  console.log(`🌐 Serveur sur port ${PORT}`);
 });
