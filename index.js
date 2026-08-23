@@ -52,7 +52,8 @@ const authenticateApiKey = (req, res, next) => {
 // 3. INITIALISATION
 // -----------------------------------------------------------------------------
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
-let waterState = 0;
+let waterState = 0; // Pourcentage (0-100)
+let latestPressure = 0; // Pression brute en Bars
 let lastSaveTime = 0; // Pour limiter l'enregistrement Supabase à 1 min
 
 // -----------------------------------------------------------------------------
@@ -84,6 +85,7 @@ client.on('message', async (topic, message) => {
       if (isNaN(pressure)) return;
 
       // Mise à jour de l'état local INSTANTANÉE (toutes les 5s)
+      latestPressure = pressure;
       const maxPressure = 2.0; // Aligné sur le dashboard Android (200 kPa)
       waterState = Math.min(Math.max((pressure / maxPressure) * 100, 0), 100);
       console.log(`📡 Temps Réel -> Pression: ${pressure} Bar | ${waterState.toFixed(1)}%`);
@@ -111,6 +113,7 @@ client.on('message', async (topic, message) => {
 // -----------------------------------------------------------------------------
 app.get('/api/status', authenticateApiKey, (req, res) => {
   res.json({
+    pressure_bar: latestPressure,
     water: parseFloat(waterState.toFixed(1)),
     status: waterState > 0 ? 'present' : 'absent'
   });
