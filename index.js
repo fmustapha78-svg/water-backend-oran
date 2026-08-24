@@ -86,7 +86,7 @@ client.on('message', async (topic, message) => {
 
       // Mise à jour de l'état local INSTANTANÉE (toutes les 5s)
       latestPressure = pressure;
-      const maxPressure = 3.0; // Mis à jour pour supporter 3.0 Bar
+      const maxPressure = 4.0; // Mis à jour pour supporter 4.0 Bar
       waterState = Math.min(Math.max((pressure / maxPressure) * 100, 0), 100);
       console.log(`📡 Temps Réel -> Pression: ${pressure} Bar | ${waterState.toFixed(1)}%`);
 
