@@ -94,10 +94,18 @@ client.on('message', async (topic, message) => {
       const now = Date.now();
       if (now - lastSaveTime >= 60000) { // 60 000 ms = 1 minute
         lastSaveTime = now;
+        // Générer un timestamp local (UTC+1) si l'ESP8266 ne l'envoie pas
+        const getLocalTimestamp = () => {
+          const now = new Date();
+          // Ajustement pour UTC+1 (60 minutes)
+          const localDate = new Date(now.getTime() + (60 * 60 * 1000));
+          return localDate.toISOString().replace('T', ' ').substring(0, 19);
+        };
+
         const recordData = {
           sensor_id: payload.device_id || 'oran_001',
           pressure_bar: pressure,
-          device_timestamp: payload.timestamp || new Date().toISOString()
+          device_timestamp: payload.timestamp || getLocalTimestamp()
         };
 
         const { error } = await supabase.from('water_pressure_logs').insert([recordData]);
