@@ -55,6 +55,7 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY
 let waterState = 0; // Pourcentage (0-100)
 let latestPressure = 0; // Pression brute en Bars
 let lastSaveTime = 0; // Pour limiter l'enregistrement Supabase à 1 min
+let lastSeen = 0; // Timestamp du dernier message reçu
 
 // -----------------------------------------------------------------------------
 // 4. MQTT
@@ -81,6 +82,7 @@ client.on('message', async (topic, message) => {
   try {
     const payload = JSON.parse(rawMsg);
     if (payload.pressure_bar !== undefined) {
+      lastSeen = Date.now(); // On met à jour l'activité
       const pressure = parseFloat(payload.pressure_bar);
       if (isNaN(pressure)) return;
 
@@ -128,10 +130,11 @@ app.get('/ping', (req, res) => {
 
 // Route de statut de l'application
 app.get('/api/status', authenticateApiKey, (req, res) => {
+  const isOnline = (Date.now() - lastSeen) < 20000; // Hors ligne après 20s sans données
   res.json({
-    pressure_bar: latestPressure,
-    water: parseFloat(waterState.toFixed(1)),
-    status: waterState > 0 ? 'present' : 'absent'
+    pressure_bar: isOnline ? latestPressure : 0,
+    water: isOnline ? parseFloat(waterState.toFixed(1)) : 0,
+    status: isOnline ? 'online' : 'offline'
   });
 });
 
