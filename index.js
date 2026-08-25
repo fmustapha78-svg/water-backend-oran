@@ -56,6 +56,7 @@ let waterState = 0; // Pourcentage (0-100)
 let latestPressure = 0; // Pression brute en Bars
 let lastSaveTime = 0; // Pour limiter l'enregistrement Supabase à 1 min
 let lastSeen = 0; // Timestamp du dernier message reçu
+let isSensorConnected = true; // État matériel du capteur
 
 // -----------------------------------------------------------------------------
 // 4. MQTT
@@ -82,7 +83,9 @@ client.on('message', async (topic, message) => {
   try {
     const payload = JSON.parse(rawMsg);
     if (payload.pressure_bar !== undefined) {
-      lastSeen = Date.now(); // On met à jour l'activité
+      lastSeen = Date.now();
+      isSensorConnected = payload.sensor_connected !== false; // Reçoit l'état de l'ESP
+
       const pressure = parseFloat(payload.pressure_bar);
       if (isNaN(pressure)) return;
 
@@ -130,11 +133,12 @@ app.get('/ping', (req, res) => {
 
 // Route de statut de l'application
 app.get('/api/status', authenticateApiKey, (req, res) => {
-  const isOnline = (Date.now() - lastSeen) < 20000; // Hors ligne après 20s sans données
+  const isOnline = (Date.now() - lastSeen) < 20000;
   res.json({
-    pressure_bar: isOnline ? latestPressure : 0,
-    water: isOnline ? parseFloat(waterState.toFixed(1)) : 0,
-    status: isOnline ? 'online' : 'offline'
+    pressure_bar: (isOnline && isSensorConnected) ? latestPressure : 0,
+    water: (isOnline && isSensorConnected) ? parseFloat(waterState.toFixed(1)) : 0,
+    status: isOnline ? (isSensorConnected ? 'online' : 'sensor_error') : 'offline',
+    sensor_connected: isSensorConnected
   });
 });
 
