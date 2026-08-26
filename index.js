@@ -57,6 +57,15 @@ let latestPressure = 0; // Pression brute en Bars
 let lastSaveTime = 0; // Pour limiter l'enregistrement Supabase à 1 min
 let lastSeen = 0; // Timestamp du dernier message reçu
 let isSensorConnected = true; // État matériel du capteur
+let deviceStats = {
+  uptime: 0,
+  rssi: 0,
+  free_heap: 0,
+  ip: '0.0.0.0',
+  wifi_status: 'UNKNOWN',
+  mqtt_status: 'UNKNOWN',
+  device_id: 'N/A'
+};
 
 // -----------------------------------------------------------------------------
 // 4. MQTT
@@ -75,13 +84,34 @@ const client = mqtt.connect(brokerUrl, {
 
 client.on('connect', () => {
   console.log('✅ Connecté MQTT');
-  client.subscribe('oran/water/pressure');
+  client.subscribe(['oran/water/pressure', 'oran/water/status']);
 });
 
 client.on('message', async (topic, message) => {
   const rawMsg = message.toString().trim();
   try {
     const payload = JSON.parse(rawMsg);
+
+    if (topic === 'oran/water/status') {
+      if (payload.status === 'OFFLINE') {
+        console.warn('⚠️ ESP8266 déconnecté (LWT)');
+        lastSeen = 0; // Force offline
+      } else {
+        lastSeen = Date.now();
+        deviceStats = {
+          uptime: payload.uptime_s || 0,
+          rssi: payload.rssi_dbm || 0,
+          free_heap: payload.free_heap_bytes || 0,
+          ip: payload.ip || '0.0.0.0',
+          wifi_status: payload.wifi || 'DISCONNECTED',
+          mqtt_status: payload.mqtt || 'DISCONNECTED',
+          device_id: payload.device_id || 'oran_001'
+        };
+        console.log(`📊 Diagnostic reçu: RSSI ${deviceStats.rssi} dBm, Uptime ${deviceStats.uptime}s`);
+      }
+      return;
+    }
+
     if (payload.pressure_bar !== undefined) {
       lastSeen = Date.now();
       isSensorConnected = payload.sensor_connected !== false; // Reçoit l'état de l'ESP
@@ -138,7 +168,8 @@ app.get('/api/status', authenticateApiKey, (req, res) => {
     pressure_bar: (isOnline && isSensorConnected) ? latestPressure : 0,
     water: (isOnline && isSensorConnected) ? parseFloat(waterState.toFixed(1)) : 0,
     status: isOnline ? (isSensorConnected ? 'online' : 'sensor_error') : 'offline',
-    sensor_connected: isSensorConnected
+    sensor_connected: isSensorConnected,
+    device_stats: isOnline ? deviceStats : null
   });
 });
 
