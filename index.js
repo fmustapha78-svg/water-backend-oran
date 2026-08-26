@@ -30,6 +30,27 @@ app.use(helmet());
 app.use(cors({ origin: '*', methods: ['GET', 'POST'] }));
 app.use(express.json({ limit: '10kb' }));
 
+// Middleware pour calculer l'usage (Simuler les données du dashboard Render)
+app.use((req, res, next) => {
+  const oldWrite = res.write;
+  const oldEnd = res.end;
+  const chunks = [];
+
+  res.write = (...args) => {
+    chunks.push(Buffer.from(args[0]));
+    return oldWrite.apply(res, args);
+  };
+
+  res.end = (...args) => {
+    if (args[0]) chunks.push(Buffer.from(args[0]));
+    const size = chunks.reduce((total, chunk) => total + chunk.length, 0);
+    usageStats.requests++;
+    usageStats.bytes_sent += size;
+    oldEnd.apply(res, args);
+  };
+  next();
+});
+
 // Limite augmentée pour permettre la lecture "temps réel" de l'application (5s)
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -65,6 +86,12 @@ let deviceStats = {
   wifi_status: 'UNKNOWN',
   mqtt_status: 'UNKNOWN',
   device_id: 'N/A'
+};
+
+// Statistiques d'utilisation Render (Simulation locale)
+let usageStats = {
+  requests: 0,
+  bytes_sent: 0
 };
 
 // -----------------------------------------------------------------------------
@@ -169,7 +196,11 @@ app.get('/api/status', authenticateApiKey, (req, res) => {
     water: (isOnline && isSensorConnected) ? parseFloat(waterState.toFixed(1)) : 0,
     status: isOnline ? (isSensorConnected ? 'online' : 'sensor_error') : 'offline',
     sensor_connected: isSensorConnected,
-    device_stats: isOnline ? deviceStats : null
+    device_stats: isOnline ? deviceStats : null,
+    usage: {
+      http_responses_mb: parseFloat((usageStats.bytes_sent / (1024 * 1024)).toFixed(2)),
+      requests_count: usageStats.requests
+    }
   });
 });
 
