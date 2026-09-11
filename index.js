@@ -154,23 +154,22 @@ client.on('message', async (topic, message) => {
       return;
     }
 
-    if (payload.pressure_bar !== undefined) {
-      lastSeen = Date.now();
-      isSensorConnected = payload.sensor_connected !== false; // Reçoit l'état de l'ESP
-
-      const pressure = parseFloat(payload.pressure_bar);
-      if (isNaN(pressure)) return;
-
-      // LOGIQUE D'ALERTE FIREBASE
-      if (pressure <= 0.00) {
-        if (!isCoupureAlerteEnvoyee && userFcmToken) {
-          envoiNotification("⚠️ ALERTE : COUPURE D'EAU", "La pression est tombée à 0.00 bar !");
-          isCoupureAlerteEnvoyee = true;
+// LOGIQUE D'ALERTE FIREBASE
+      if (pressure <= 0.02) { // Détection élargie pour plus de sécurité
+        if (!isCoupureAlerteEnvoyee) {
+          if (userFcmToken) {
+            envoiNotification("⚠️ ALERTE : COUPURE D'EAU", `Pression critique détectée à ${pressure.toFixed(2)} bar.`);
+            isCoupureAlerteEnvoyee = true;
+            console.log("📢 Notification de coupure envoyée au téléphone.");
+          } else {
+            console.warn("⚠️ Impossible d'envoyer l'alerte : Aucun Token enregistré.");
+          }
         }
-      } else if (pressure > 0.10) {
+      } else if (pressure >= 0.15) { // Seuil de retour plus franc
         if (isCoupureAlerteEnvoyee && userFcmToken) {
           envoiNotification("✅ L'EAU EST REVENUE", `Pression rétablie : ${pressure.toFixed(2)} bar.`);
           isCoupureAlerteEnvoyee = false;
+          console.log("📢 Notification de retour d'eau envoyée.");
         }
       }
 
@@ -232,12 +231,19 @@ app.get('/api/status', authenticateApiKey, (req, res) => {
   });
 });
 
+// NOUVELLE ROUTE : Test Manuel de Notification
+app.get('/api/test-notif', (req, res) => {
+  if (!userFcmToken) return res.status(400).send("Erreur : Aucun téléphone enregistré (Token null)");
+  envoiNotification("🔔 TEST SYSTÈME", "Ceci est un message de vérification du serveur Oran.");
+  res.send("🚀 Tentative d'envoi en cours vers votre téléphone...");
+});
+
 // NOUVELLE ROUTE : Enregistrement du Token FCM
 app.post('/api/register-token', (req, res) => {
   const { token } = req.body;
   if (token) {
     userFcmToken = token;
-    console.log("📱 Nouveau jeton reçu :", token.substring(0, 10) + "...");
+    console.log("📱 Appairage réussi avec le téléphone. Token prêt.");
     return res.status(200).json({ status: "ok" });
   }
   res.status(400).json({ error: "Token manquant" });
