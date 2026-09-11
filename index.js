@@ -233,8 +233,9 @@ app.get('/api/status', authenticateApiKey, (req, res) => {
 
 // NOUVELLE ROUTE : Test Manuel de Notification
 app.get('/api/test-notif', (req, res) => {
+  console.log("🔗 Route de TEST NOTIF sollicitée");
   envoiNotification("🔔 TEST SYSTÈME", "Ceci est un message de vérification diffusé via Firebase.");
-  res.send("🚀 Tentative de diffusion sur le canal 'water_alerts' en cours...");
+  res.status(200).send("🚀 Tentative de diffusion sur le canal 'water_alerts' en cours... Vérifiez votre téléphone !");
 });
 
 // Route simplifiée (Le token n'est plus nécessaire ici)
