@@ -5,6 +5,18 @@ const helmet = require('helmet');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 const { createClient } = require('@supabase/supabase-js');
+const admin = require('firebase-admin');
+
+// 1. INITIALISATION FIREBASE
+try {
+  const serviceAccount = require("./serviceAccountKey.json");
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount)
+  });
+  console.log("✅ Firebase Admin initialisé");
+} catch (e) {
+  console.warn("⚠️ Firebase non configuré (serviceAccountKey.json manquant).");
+}
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -78,6 +90,8 @@ let latestPressure = 0; // Pression brute en Bars
 let lastSaveTime = 0; // Pour limiter l'enregistrement Supabase à 1 min
 let lastSeen = 0; // Timestamp du dernier message reçu
 let isSensorConnected = true; // État matériel du capteur
+let userFcmToken = null; // Stocke le jeton du téléphone
+let isCoupureAlerteEnvoyee = false; // Anti-spam
 let deviceStats = {
   uptime: 0,
   rssi: 0,
@@ -146,6 +160,19 @@ client.on('message', async (topic, message) => {
       const pressure = parseFloat(payload.pressure_bar);
       if (isNaN(pressure)) return;
 
+      // LOGIQUE D'ALERTE FIREBASE
+      if (pressure <= 0.00) {
+        if (!isCoupureAlerteEnvoyee && userFcmToken) {
+          envoiNotification("⚠️ ALERTE : COUPURE D'EAU", "La pression est tombée à 0.00 bar !");
+          isCoupureAlerteEnvoyee = true;
+        }
+      } else if (pressure > 0.10) {
+        if (isCoupureAlerteEnvoyee && userFcmToken) {
+          envoiNotification("✅ L'EAU EST REVENUE", `Pression rétablie : ${pressure.toFixed(2)} bar.`);
+          isCoupureAlerteEnvoyee = false;
+        }
+      }
+
       // Mise à jour de l'état local INSTANTANÉE (toutes les 5s)
       latestPressure = pressure;
       const maxPressure = 5.0; // Mis à jour à 5.0 Bar pour cohérence avec l'App Android
@@ -190,19 +217,33 @@ app.get('/ping', (req, res) => {
 
 // Route de statut de l'application
 app.get('/api/status', authenticateApiKey, (req, res) => {
-  const isOnline = (Date.now() - lastSeen) < 20000;
-  res.json({
-    pressure_bar: (isOnline && isSensorConnected) ? latestPressure : 0,
-    water: (isOnline && isSensorConnected) ? parseFloat(waterState.toFixed(1)) : 0,
-    status: isOnline ? (isSensorConnected ? 'online' : 'sensor_error') : 'offline',
-    sensor_connected: isSensorConnected,
-    device_stats: isOnline ? deviceStats : null,
-    usage: {
-      http_responses_mb: parseFloat((usageStats.bytes_sent / (1024 * 1024)).toFixed(2)),
-      requests_count: usageStats.requests
-    }
-  });
+  // ...
 });
+
+// NOUVELLE ROUTE : Enregistrement du Token FCM
+app.post('/api/register-token', (req, res) => {
+  const { token } = req.body;
+  if (token) {
+    userFcmToken = token;
+    console.log("📱 Nouveau jeton reçu :", token.substring(0, 10) + "...");
+    return res.status(200).json({ status: "ok" });
+  }
+  res.status(400).json({ error: "Token manquant" });
+});
+
+async function envoiNotification(title, body) {
+  if (!userFcmToken) return;
+  const message = {
+    notification: { title, body },
+    token: userFcmToken
+  };
+  try {
+    await admin.messaging().send(message);
+    console.log("🚀 Notification envoyée avec succès");
+  } catch (error) {
+    console.error("❌ Erreur envoi FCM :", error);
+  }
+}
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🌐 Serveur sur port ${PORT}`);
