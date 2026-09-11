@@ -97,7 +97,6 @@ let latestPressure = 0; // Pression brute en Bars
 let lastSaveTime = 0; // Pour limiter l'enregistrement Supabase à 1 min
 let lastSeen = 0; // Timestamp du dernier message reçu
 let isSensorConnected = true; // État matériel du capteur
-let userFcmToken = null; // Stocke le jeton du téléphone
 let isCoupureAlerteEnvoyee = false; // Anti-spam
 let deviceStats = {
   uptime: 0,
@@ -154,22 +153,18 @@ client.on('message', async (topic, message) => {
       return;
     }
 
-// LOGIQUE D'ALERTE FIREBASE
-      if (pressure <= 0.02) { // Détection élargie pour plus de sécurité
+// LOGIQUE D'ALERTE FIREBASE (Via Topic)
+      if (pressure <= 0.02) {
         if (!isCoupureAlerteEnvoyee) {
-          if (userFcmToken) {
-            envoiNotification("⚠️ ALERTE : COUPURE D'EAU", `Pression critique détectée à ${pressure.toFixed(2)} bar.`);
-            isCoupureAlerteEnvoyee = true;
-            console.log("📢 Notification de coupure envoyée au téléphone.");
-          } else {
-            console.warn("⚠️ Impossible d'envoyer l'alerte : Aucun Token enregistré.");
-          }
+          envoiNotification("⚠️ ALERTE : COUPURE D'EAU", `Pression critique détectée à ${pressure.toFixed(2)} bar.`);
+          isCoupureAlerteEnvoyee = true;
+          console.log("📢 Alerte de coupure diffusée sur le canal 'water_alerts'.");
         }
-      } else if (pressure >= 0.15) { // Seuil de retour plus franc
-        if (isCoupureAlerteEnvoyee && userFcmToken) {
+      } else if (pressure >= 0.15) {
+        if (isCoupureAlerteEnvoyee) {
           envoiNotification("✅ L'EAU EST REVENUE", `Pression rétablie : ${pressure.toFixed(2)} bar.`);
           isCoupureAlerteEnvoyee = false;
-          console.log("📢 Notification de retour d'eau envoyée.");
+          console.log("📢 Info de retour d'eau diffusée.");
         }
       }
 
@@ -233,33 +228,25 @@ app.get('/api/status', authenticateApiKey, (req, res) => {
 
 // NOUVELLE ROUTE : Test Manuel de Notification
 app.get('/api/test-notif', (req, res) => {
-  if (!userFcmToken) return res.status(400).send("Erreur : Aucun téléphone enregistré (Token null)");
-  envoiNotification("🔔 TEST SYSTÈME", "Ceci est un message de vérification du serveur Oran.");
-  res.send("🚀 Tentative d'envoi en cours vers votre téléphone...");
+  envoiNotification("🔔 TEST SYSTÈME", "Ceci est un message de vérification diffusé via Firebase.");
+  res.send("🚀 Tentative de diffusion sur le canal 'water_alerts' en cours...");
 });
 
-// NOUVELLE ROUTE : Enregistrement du Token FCM
+// Route simplifiée (Le token n'est plus nécessaire ici)
 app.post('/api/register-token', (req, res) => {
-  const { token } = req.body;
-  if (token) {
-    userFcmToken = token;
-    console.log("📱 Appairage réussi avec le téléphone. Token prêt.");
-    return res.status(200).json({ status: "ok" });
-  }
-  res.status(400).json({ error: "Token manquant" });
+  res.status(200).json({ status: "ok", message: "Le système utilise désormais les Topics" });
 });
 
 async function envoiNotification(title, body) {
-  if (!userFcmToken) return;
   const message = {
     notification: { title, body },
-    token: userFcmToken
+    topic: "water_alerts" // Envoi à tous les abonnés
   };
   try {
     await admin.messaging().send(message);
-    console.log("🚀 Notification envoyée avec succès");
+    console.log("🚀 Notification diffusée avec succès");
   } catch (error) {
-    console.error("❌ Erreur envoi FCM :", error);
+    console.error("❌ Erreur diffusion FCM :", error);
   }
 }
 
