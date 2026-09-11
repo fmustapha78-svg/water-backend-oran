@@ -153,7 +153,14 @@ client.on('message', async (topic, message) => {
       return;
     }
 
-// LOGIQUE D'ALERTE FIREBASE (Via Topic)
+    if (payload.pressure_bar !== undefined) {
+      lastSeen = Date.now();
+      isSensorConnected = payload.sensor_connected !== false;
+
+      const pressure = parseFloat(payload.pressure_bar);
+      if (isNaN(pressure)) return;
+
+      // LOGIQUE D'ALERTE FIREBASE (Via Topic)
       if (pressure <= 0.02) {
         if (!isCoupureAlerteEnvoyee) {
           envoiNotification("⚠️ ALERTE : COUPURE D'EAU", `Pression critique détectée à ${pressure.toFixed(2)} bar.`);
@@ -170,18 +177,16 @@ client.on('message', async (topic, message) => {
 
       // Mise à jour de l'état local INSTANTANÉE (toutes les 5s)
       latestPressure = pressure;
-      const maxPressure = 5.0; // Mis à jour à 5.0 Bar pour cohérence avec l'App Android
+      const maxPressure = 5.0;
       waterState = Math.min(Math.max((pressure / maxPressure) * 100, 0), 100);
       console.log(`📡 Temps Réel -> Pression: ${pressure} Bar | ${waterState.toFixed(1)}%`);
 
       // ENREGISTREMENT SUPABASE LIMITÉ À 1 MINUTE
       const now = Date.now();
-      if (now - lastSaveTime >= 60000) { // 60 000 ms = 1 minute
+      if (now - lastSaveTime >= 60000) {
         lastSaveTime = now;
-        // Générer un timestamp local (UTC+1) si l'ESP8266 ne l'envoie pas
         const getLocalTimestamp = () => {
           const now = new Date();
-          // Ajustement pour UTC+1 (60 minutes)
           const localDate = new Date(now.getTime() + (60 * 60 * 1000));
           return localDate.toISOString().replace('T', ' ').substring(0, 19);
         };
