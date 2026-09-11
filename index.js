@@ -5,17 +5,21 @@ const helmet = require('helmet');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 const { createClient } = require('@supabase/supabase-js');
-const admin = require('firebase-admin');
+const { initializeApp, cert } = require('firebase-admin/app');
+const { getMessaging } = require('firebase-admin/messaging');
 
 // 1. INITIALISATION FIREBASE
+let messaging;
 try {
   const serviceAccount = require("./serviceAccountKey.json");
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount)
+  const firebaseApp = initializeApp({
+    credential: cert(serviceAccount)
   });
-  console.log("✅ Firebase Admin initialisé");
+  messaging = getMessaging(firebaseApp);
+  console.log("✅ Firebase Admin (Messaging) initialisé");
 } catch (e) {
-  console.warn("⚠️ Firebase non configuré (serviceAccountKey.json manquant).");
+  console.warn("⚠️ Firebase non configuré ou serviceAccountKey.json manquant.");
+  console.error("Détail erreur Firebase:", e.message);
 }
 
 const app = express();
@@ -244,6 +248,11 @@ app.post('/api/register-token', (req, res) => {
 });
 
 async function envoiNotification(title, body) {
+  if (!messaging) {
+    console.error("❌ Notification annulée : Firebase Messaging n'est pas initialisé");
+    return;
+  }
+
   const message = {
     notification: { title, body },
     data: { title, body, click_action: "FLUTTER_NOTIFICATION_CLICK" },
@@ -259,7 +268,7 @@ async function envoiNotification(title, body) {
     topic: "water_alerts"
   };
   try {
-    const response = await admin.messaging().send(message);
+    const response = await messaging.send(message);
     console.log("🚀 Notification diffusée avec succès :", response);
   } catch (error) {
     console.error("❌ Erreur diffusion FCM :", error);
