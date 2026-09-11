@@ -246,11 +246,21 @@ app.post('/api/register-token', (req, res) => {
 async function envoiNotification(title, body) {
   const message = {
     notification: { title, body },
-    topic: "water_alerts" // Envoi à tous les abonnés
+    data: { title, body, click_action: "FLUTTER_NOTIFICATION_CLICK" },
+    android: {
+      priority: "high",
+      notification: {
+        channel_id: "water_alerts_channel",
+        priority: "high",
+        default_sound: true,
+        default_vibrate_timings: true
+      }
+    },
+    topic: "water_alerts"
   };
   try {
-    await admin.messaging().send(message);
-    console.log("🚀 Notification diffusée avec succès");
+    const response = await admin.messaging().send(message);
+    console.log("🚀 Notification diffusée avec succès :", response);
   } catch (error) {
     console.error("❌ Erreur diffusion FCM :", error);
   }
