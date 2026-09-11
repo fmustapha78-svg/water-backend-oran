@@ -82,9 +82,16 @@ const authenticateApiKey = (req, res, next) => {
 };
 
 // -----------------------------------------------------------------------------
-// 3. INITIALISATION
+// 3. INITIALISATION & VARIABLES GLOBALES
 // -----------------------------------------------------------------------------
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+
+// Statistiques d'utilisation Render (Simulation locale)
+let usageStats = {
+  requests: 0,
+  bytes_sent: 0
+};
+
 let waterState = 0; // Pourcentage (0-100)
 let latestPressure = 0; // Pression brute en Bars
 let lastSaveTime = 0; // Pour limiter l'enregistrement Supabase à 1 min
@@ -100,12 +107,6 @@ let deviceStats = {
   wifi_status: 'UNKNOWN',
   mqtt_status: 'UNKNOWN',
   device_id: 'N/A'
-};
-
-// Statistiques d'utilisation Render (Simulation locale)
-let usageStats = {
-  requests: 0,
-  bytes_sent: 0
 };
 
 // -----------------------------------------------------------------------------
@@ -217,7 +218,18 @@ app.get('/ping', (req, res) => {
 
 // Route de statut de l'application
 app.get('/api/status', authenticateApiKey, (req, res) => {
-  // ...
+  const isOnline = (Date.now() - lastSeen) < 20000;
+  res.json({
+    pressure_bar: (isOnline && isSensorConnected) ? latestPressure : 0,
+    water: (isOnline && isSensorConnected) ? parseFloat(waterState.toFixed(1)) : 0,
+    status: isOnline ? (isSensorConnected ? 'online' : 'sensor_error') : 'offline',
+    sensor_connected: isSensorConnected,
+    device_stats: isOnline ? deviceStats : null,
+    usage: {
+      http_responses_mb: parseFloat((usageStats.bytes_sent / (1024 * 1024)).toFixed(2)),
+      requests_count: usageStats.requests
+    }
+  });
 });
 
 // NOUVELLE ROUTE : Enregistrement du Token FCM
