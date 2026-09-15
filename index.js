@@ -101,7 +101,8 @@ let latestPressure = 0; // Pression brute en Bars
 let lastSaveTime = 0; // Pour limiter l'enregistrement Supabase à 1 min
 let lastSeen = 0; // Timestamp du dernier message reçu
 let isSensorConnected = true; // État matériel du capteur
-let isCoupureAlerteEnvoyee = false; // Anti-spam
+let isCoupureAlerteEnvoyee = false;
+let cutOffStartTime = 0; // Stocke le moment précis de la coupure
 let deviceStats = {
   uptime: 0,
   rssi: 0,
@@ -167,15 +168,19 @@ client.on('message', async (topic, message) => {
       // LOGIQUE D'ALERTE FIREBASE (Via Topic)
       if (pressure <= 0.02) {
         if (!isCoupureAlerteEnvoyee) {
-          envoiNotification("⚠️ ALERTE : COUPURE D'EAU", `Pression critique détectée à ${pressure.toFixed(2)} bar.`);
+          cutOffStartTime = Date.now(); // On enregistre le début
+          envoiNotification("⚠️ ALERTE : COUPURE D'EAU", `Coupure détectée à ${new Date().toLocaleTimeString('fr-FR')} à la zone Oran.`);
           isCoupureAlerteEnvoyee = true;
-          console.log("📢 Alerte de coupure diffusée sur le canal 'water_alerts'.");
+          console.log("📢 Alerte de coupure diffusée.");
         }
       } else if (pressure >= 0.15) {
         if (isCoupureAlerteEnvoyee) {
-          envoiNotification("✅ L'EAU EST REVENUE", `Pression rétablie : ${pressure.toFixed(2)} bar.`);
+          const durationMin = Math.round((Date.now() - cutOffStartTime) / 60000);
+          const durationText = durationMin >= 60 ? `${Math.floor(durationMin/60)}h ${durationMin%60}min` : `${durationMin} min`;
+
+          envoiNotification("✅ L'EAU EST REVENUE", `Pression rétablie : ${pressure.toFixed(2)} bar. Durée de la coupure : ${durationText}.`);
           isCoupureAlerteEnvoyee = false;
-          console.log("📢 Info de retour d'eau diffusée.");
+          console.log(`📢 Retour d'eau diffusé. Durée: ${durationText}`);
         }
       }
 
